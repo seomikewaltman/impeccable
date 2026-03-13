@@ -1,5 +1,5 @@
 import path from 'path';
-import { cleanDir, ensureDir, writeFile, generateYamlFrontmatter, replacePlaceholders } from '../utils.js';
+import { cleanDir, ensureDir, writeFile, generateYamlFrontmatter, replacePlaceholders, prefixSkillReferences } from '../utils.js';
 
 /**
  * Gemini Transformer (Skills Only)
@@ -23,9 +23,11 @@ export function transformGemini(skills, distDir, patterns = null, options = {}) 
   cleanDir(geminiDir);
   ensureDir(skillsDir);
 
+  const allSkillNames = skills.map(s => s.name);
+  const commandNames = skills.filter(s => s.userInvokable).map(s => `${prefix}${s.name}`);
   let refCount = 0;
   for (const skill of skills) {
-    const skillName = skill.userInvokable ? `${prefix}${skill.name}` : skill.name;
+    const skillName = `${prefix}${skill.name}`;
     const skillDir = path.join(skillsDir, skillName);
 
     const frontmatter = generateYamlFrontmatter({
@@ -33,7 +35,8 @@ export function transformGemini(skills, distDir, patterns = null, options = {}) 
       description: skill.description,
     });
 
-    let skillBody = replacePlaceholders(skill.body, 'gemini');
+    let skillBody = replacePlaceholders(skill.body, 'gemini', commandNames);
+    if (prefix) skillBody = prefixSkillReferences(skillBody, prefix, allSkillNames);
     // For user-invokable skills, replace remaining {{arg}} placeholders with {{args}}
     if (skill.userInvokable) {
       skillBody = skillBody.replace(/\{\{[^}]+\}\}/g, '{{args}}');

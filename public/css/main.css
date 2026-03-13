@@ -2208,6 +2208,88 @@ code {
   border-radius: 4px;
 }
 
+/* Prefix toggle (inline with download button) */
+.install-terminal-cmd--download {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.prefix-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.06);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.prefix-toggle:hover {
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.prefix-toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.prefix-toggle-slider {
+  position: relative;
+  width: 32px;
+  height: 18px;
+  background: var(--color-mist);
+  border-radius: 18px;
+  transition: background var(--duration-fast) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.prefix-toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--color-paper);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.prefix-toggle input:checked + .prefix-toggle-slider {
+  background: var(--color-accent);
+}
+
+.prefix-toggle input:checked + .prefix-toggle-slider::after {
+  transform: translateX(14px);
+}
+
+.prefix-toggle input:focus-visible + .prefix-toggle-slider {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.prefix-toggle-label {
+  font-size: 0.75rem;
+  color: var(--color-charcoal);
+  white-space: nowrap;
+}
+
+.prefix-toggle-label code {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  background: var(--color-accent-dim);
+  color: var(--color-accent);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
 .download-tip {
   font-size: 0.8125rem;
   color: var(--color-ash);

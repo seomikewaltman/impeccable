@@ -23,7 +23,10 @@ import {
   transformClaudeCode,
   transformGemini,
   transformCodex,
-  transformAgents
+  transformAgents,
+  transformKiro,
+  transformOpenCode,
+  transformPi
 } from './lib/transformers/index.js';
 import { createAllZips } from './lib/zip.js';
 import { execSync } from 'child_process';
@@ -130,8 +133,8 @@ async function buildStaticSite() {
 /**
  * Assemble universal directory from all provider outputs
  */
-function assembleUniversal(distDir) {
-  const universalDir = path.join(distDir, 'universal');
+function assembleUniversal(distDir, suffix = '') {
+  const universalDir = path.join(distDir, `universal${suffix}`);
 
   // Clean and recreate
   if (fs.existsSync(universalDir)) {
@@ -144,10 +147,13 @@ function assembleUniversal(distDir) {
     { provider: 'gemini', configDir: '.gemini' },
     { provider: 'codex', configDir: '.codex' },
     { provider: 'agents', configDir: '.agents' },
+    { provider: 'kiro', configDir: '.kiro' },
+    { provider: 'opencode', configDir: '.opencode' },
+    { provider: 'pi', configDir: '.pi' }
   ];
 
   for (const { provider, configDir } of providerMappings) {
-    const src = path.join(distDir, provider, configDir);
+    const src = path.join(distDir, `${provider}${suffix}`, configDir);
     const dest = path.join(universalDir, configDir);
     if (fs.existsSync(src)) {
       copyDirSync(src, dest);
@@ -156,10 +162,11 @@ function assembleUniversal(distDir) {
 
   // Add a visible README so macOS users don't see an empty folder
   // (all provider dirs are dotfiles, hidden by default in Finder)
+  const prefixNote = suffix ? '\nSkills in this bundle are prefixed with i- (e.g. /i-audit) to avoid conflicts.\n' : '';
   fs.writeFileSync(path.join(universalDir, 'README.txt'),
 `Impeccable — Design fluency for AI harnesses
 https://impeccable.style
-
+${prefixNote}
 This folder contains skills for all supported tools:
 
   .cursor/    → Cursor
@@ -167,12 +174,142 @@ This folder contains skills for all supported tools:
   .gemini/    → Gemini CLI
   .codex/     → Codex CLI
   .agents/    → VS Code Copilot, Antigravity
+  .kiro/      → Kiro
+  .opencode/  → OpenCode
+  .pi/        → Pi
 
 To install, copy the relevant folder(s) into your project root.
 These are hidden folders (dotfiles) — press Cmd+Shift+. in Finder to see them.
 `);
 
-  console.log(`✓ Assembled universal directory (${providerMappings.length} providers)`);
+  const label = suffix ? ' (prefixed)' : '';
+  console.log(`✓ Assembled universal${label} directory (${providerMappings.length} providers)`);
+}
+
+/**
+ * Generate static API data for Cloudflare Pages deployment.
+ * Pre-builds all API responses as JSON files so they can be served
+ * as static assets via _redirects rewrites (no function invocations needed).
+ */
+function generateApiData(buildDir, skills, patterns) {
+  const apiDir = path.join(buildDir, '_data', 'api');
+  fs.mkdirSync(apiDir, { recursive: true });
+
+  // skills.json
+  const skillsData = skills.map(s => ({
+    id: path.basename(path.dirname(s.filePath)),
+    name: s.name,
+    description: s.description,
+    userInvokable: s.userInvokable,
+  }));
+  fs.writeFileSync(path.join(apiDir, 'skills.json'), JSON.stringify(skillsData));
+
+  // commands.json (user-invokable skills only)
+  const commandsData = skillsData.filter(s => s.userInvokable);
+  fs.writeFileSync(path.join(apiDir, 'commands.json'), JSON.stringify(commandsData));
+
+  // patterns.json
+  fs.writeFileSync(path.join(apiDir, 'patterns.json'), JSON.stringify(patterns));
+
+  // command-source/{id}.json (one per skill)
+  const cmdSourceDir = path.join(apiDir, 'command-source');
+  fs.mkdirSync(cmdSourceDir, { recursive: true });
+  for (const skill of skills) {
+    const id = path.basename(path.dirname(skill.filePath));
+    const content = fs.readFileSync(skill.filePath, 'utf-8');
+    fs.writeFileSync(
+      path.join(cmdSourceDir, `${id}.json`),
+      JSON.stringify({ content })
+    );
+  }
+
+  console.log(`✓ Generated static API data (${skillsData.length} skills, ${commandsData.length} commands)`);
+}
+
+/**
+ * Copy dist files to build output for Cloudflare Pages Functions access.
+ * Download functions use env.ASSETS.fetch() to read these files.
+ */
+function copyDistToBuild(distDir, buildDir) {
+  const destDir = path.join(buildDir, '_data', 'dist');
+  copyDirSync(distDir, destDir);
+  console.log('✓ Copied dist files to build output');
+}
+
+/**
+ * Generate Cloudflare Pages config files (_headers, _redirects)
+ */
+function generateCFConfig(buildDir) {
+  // _headers: security + cache headers
+  const headers = `/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+
+# HTML pages: browser always revalidates, CDN caches 1h
+/*.html
+  Cache-Control: public, max-age=0, s-maxage=3600, stale-while-revalidate=600
+
+# Hashed JS/CSS bundles: immutable (filename changes on content change)
+/assets/*.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*.css
+  Cache-Control: public, max-age=31536000, immutable
+
+# Static images and logos: 1 week + 1 day stale
+/assets/*.png
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/assets/*.svg
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/assets/*.webp
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/antipattern-images/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+# Root static assets (favicon, og-image, etc.)
+/favicon.svg
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/og-image.jpg
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+/apple-touch-icon.png
+  Cache-Control: public, max-age=604800, stale-while-revalidate=86400
+
+# ZIP downloads: 1h cache
+/dist/*.zip
+  Cache-Control: public, max-age=3600, stale-while-revalidate=600
+
+# API routes: CDN caches 24h
+/api/*
+  Cache-Control: public, s-maxage=86400, stale-while-revalidate=3600
+
+/_data/api/*
+  Cache-Control: public, s-maxage=86400, stale-while-revalidate=3600
+`;
+  fs.writeFileSync(path.join(buildDir, '_headers'), headers);
+
+  // _redirects: rewrite JSON API routes to static files (200 = rewrite, not redirect)
+  const redirects = `/api/skills /_data/api/skills.json 200
+/api/commands /_data/api/commands.json 200
+/api/patterns /_data/api/patterns.json 200
+/api/command-source/:id /_data/api/command-source/:id.json 200
+`;
+  fs.writeFileSync(path.join(buildDir, '_redirects'), redirects);
+
+  // _routes.json: tell Cloudflare Pages which paths invoke Functions
+  // Without this, the SPA fallback serves index.html for function routes
+  const routes = {
+    version: 1,
+    include: ['/api/download/*'],
+    exclude: [],
+  };
+  fs.writeFileSync(path.join(buildDir, '_routes.json'), JSON.stringify(routes, null, 2));
+
+  console.log('✓ Generated Cloudflare Pages config (_headers, _redirects, _routes.json)');
 }
 
 /**
@@ -209,12 +346,32 @@ async function build() {
   transformGemini(skills, DIST_DIR, patterns);
   transformCodex(skills, DIST_DIR, patterns);
   transformAgents(skills, DIST_DIR, patterns);
+  transformKiro(skills, DIST_DIR, patterns);
+  transformOpenCode(skills, DIST_DIR, patterns);
+  transformPi(skills, DIST_DIR, patterns);
 
-  // Assemble universal directory
+  // Transform for each provider (prefixed with i-)
+  const prefixOptions = { prefix: 'i-', outputSuffix: '-prefixed' };
+  transformCursor(skills, DIST_DIR, patterns, prefixOptions);
+  transformClaudeCode(skills, DIST_DIR, patterns, prefixOptions);
+  transformGemini(skills, DIST_DIR, patterns, prefixOptions);
+  transformCodex(skills, DIST_DIR, patterns, prefixOptions);
+  transformAgents(skills, DIST_DIR, patterns, prefixOptions);
+  transformKiro(skills, DIST_DIR, patterns, prefixOptions);
+  transformOpenCode(skills, DIST_DIR, patterns, prefixOptions);
+  transformPi(skills, DIST_DIR, patterns, prefixOptions);
+
+  // Assemble universal directory (unprefixed and prefixed)
   assembleUniversal(DIST_DIR);
+  assembleUniversal(DIST_DIR, '-prefixed');
 
   // Create ZIP bundles (individual + universal)
   await createAllZips(DIST_DIR);
+
+  // Generate static API data and Cloudflare Pages config
+  generateApiData(buildDir, skills, patterns);
+  copyDistToBuild(DIST_DIR, buildDir);
+  generateCFConfig(buildDir);
 
   // Copy Claude Code output to project's .claude directory for local development
   const claudeCodeSrc = path.join(DIST_DIR, 'claude-code', '.claude');

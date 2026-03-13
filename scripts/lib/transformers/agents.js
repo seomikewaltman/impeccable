@@ -1,5 +1,5 @@
 import path from 'path';
-import { cleanDir, ensureDir, writeFile, generateYamlFrontmatter, replacePlaceholders } from '../utils.js';
+import { cleanDir, ensureDir, writeFile, generateYamlFrontmatter, replacePlaceholders, prefixSkillReferences } from '../utils.js';
 
 /**
  * Agents Transformer (VS Code Copilot + Antigravity)
@@ -13,15 +13,18 @@ import { cleanDir, ensureDir, writeFile, generateYamlFrontmatter, replacePlaceho
  * @param {Object} options - Optional settings
  */
 export function transformAgents(skills, distDir, patterns = null, options = {}) {
-  const agentsDir = path.join(distDir, 'agents');
+  const { prefix = '', outputSuffix = '' } = options;
+  const agentsDir = path.join(distDir, `agents${outputSuffix}`);
   const skillsDir = path.join(agentsDir, '.agents/skills');
 
   cleanDir(agentsDir);
   ensureDir(skillsDir);
 
+  const allSkillNames = skills.map(s => s.name);
+  const commandNames = skills.filter(s => s.userInvokable).map(s => `${prefix}${s.name}`);
   let refCount = 0;
   for (const skill of skills) {
-    const skillName = skill.name;
+    const skillName = `${prefix}${skill.name}`;
     const skillDir = path.join(skillsDir, skillName);
 
     const frontmatterObj = {
@@ -40,7 +43,8 @@ export function transformAgents(skills, distDir, patterns = null, options = {}) 
     }
 
     const frontmatter = generateYamlFrontmatter(frontmatterObj);
-    const skillBody = replacePlaceholders(skill.body, 'agents');
+    let skillBody = replacePlaceholders(skill.body, 'agents', commandNames);
+    if (prefix) skillBody = prefixSkillReferences(skillBody, prefix, allSkillNames);
     const content = `${frontmatter}\n\n${skillBody}`;
     const outputPath = path.join(skillDir, 'SKILL.md');
     writeFile(outputPath, content);
@@ -60,5 +64,6 @@ export function transformAgents(skills, distDir, patterns = null, options = {}) 
 
   const userInvokableCount = skills.filter(s => s.userInvokable).length;
   const refInfo = refCount > 0 ? ` (${refCount} reference files)` : '';
-  console.log(`✓ Agents: ${skills.length} skills (${userInvokableCount} user-invokable)${refInfo}`);
+  const prefixInfo = prefix ? ` [${prefix}prefixed]` : '';
+  console.log(`✓ Agents${prefixInfo}: ${skills.length} skills (${userInvokableCount} user-invokable)${refInfo}`);
 }
